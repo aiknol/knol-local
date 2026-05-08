@@ -1,6 +1,6 @@
 {
   "name": "knol-local",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Lightweight local memory layer for AI assistants — MCP server + HTTP API + CLI, backed by SQLite + FTS5. Works with Claude, Cursor, and Codex.",
   "type": "module",
   "bin": {
@@ -37,15 +37,13 @@
   },
   "author": "aiknol",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "better-sqlite3": "^11.0.0"
+    "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12",
-    "@types/node": "^20.0.0",
+    "@types/node": "^22.0.0",
     "typescript": "^5.0.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.5.0"
   }
 }

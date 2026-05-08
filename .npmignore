@@ -1,0 +1,5 @@
+# Source and dev files — not needed in the published package
+src/
+test/
+tsconfig.json
+*.tgz

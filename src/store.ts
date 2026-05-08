@@ -1,6 +1,6 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { copyFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -71,16 +71,16 @@ function toFtsQuery(raw: string): string {
 // ── Store ──────────────────────────────────────────────────────────────────
 
 export class MemoryStore {
-  private readonly db: Database.Database;
+  private readonly db: DatabaseSync;
 
   constructor(dbPath: string = DEFAULT_DB_PATH) {
     mkdirSync(join(dbPath, ".."), { recursive: true });
-    this.db = new Database(dbPath);
+    this.db = new DatabaseSync(dbPath);
 
     // Performance pragmas — safe for single-writer local use
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("synchronous  = NORMAL");
-    this.db.pragma("foreign_keys = ON");
+    this.db.exec("PRAGMA journal_mode = WAL");
+    this.db.exec("PRAGMA synchronous  = NORMAL");
+    this.db.exec("PRAGMA foreign_keys = ON");
 
     this.migrate();
   }
@@ -158,7 +158,7 @@ export class MemoryStore {
     };
 
     this.db
-      .prepare<[string, string, string | null, number, number, number, string | null]>(
+      .prepare(
         `INSERT INTO memories
            (id, content, tags, importance, created_at, updated_at, metadata)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -178,8 +178,8 @@ export class MemoryStore {
 
   get(id: string): Memory | undefined {
     const row = this.db
-      .prepare<[string], RawRow>("SELECT * FROM memories WHERE id = ?")
-      .get(id);
+      .prepare("SELECT * FROM memories WHERE id = ?")
+      .get(id) as unknown as RawRow | undefined;
     return row ? parseRow(row) : undefined;
   }
 
@@ -207,7 +207,7 @@ export class MemoryStore {
     };
 
     this.db
-      .prepare<[string, string | null, number, number, string | null, string]>(
+      .prepare(
         `UPDATE memories
          SET content = ?, tags = ?, importance = ?, updated_at = ?, metadata = ?
          WHERE id = ?`,
@@ -226,9 +226,9 @@ export class MemoryStore {
 
   delete(id: string): boolean {
     const result = this.db
-      .prepare<[string]>("DELETE FROM memories WHERE id = ?")
+      .prepare("DELETE FROM memories WHERE id = ?")
       .run(id);
-    return result.changes > 0;
+    return (result.changes as number) > 0;
   }
 
   // ── Query ─────────────────────────────────────────────────────────────────
@@ -249,7 +249,7 @@ export class MemoryStore {
       const ftsQuery = toFtsQuery(query);
       try {
         rows = this.db
-          .prepare<[string, number]>(
+          .prepare(
             `SELECT m.*, f.rank
              FROM   memories_fts f
              JOIN   memories     m ON m.rowid = f.rowid
@@ -257,28 +257,28 @@ export class MemoryStore {
              ORDER  BY f.rank * (1.0 / m.importance)  -- lower rank & higher importance first
              LIMIT  ?`,
           )
-          .all(ftsQuery, limit) as (RawRow & { rank: number })[];
+          .all(ftsQuery, limit) as unknown as (RawRow & { rank: number })[];
       } catch {
         // Fallback: simple LIKE search (handles edge-case queries)
         rows = this.db
-          .prepare<[string, number]>(
+          .prepare(
             `SELECT *, 0.0 as rank
              FROM memories
              WHERE content LIKE '%' || ? || '%'
              ORDER BY importance DESC, updated_at DESC
              LIMIT ?`,
           )
-          .all(query.trim(), limit) as (RawRow & { rank: number })[];
+          .all(query.trim(), limit) as unknown as (RawRow & { rank: number })[];
       }
     } else {
       rows = this.db
-        .prepare<[number]>(
+        .prepare(
           `SELECT *, 0.0 as rank
            FROM memories
            ORDER BY importance DESC, updated_at DESC
            LIMIT ?`,
         )
-        .all(limit) as (RawRow & { rank: number })[];
+        .all(limit) as unknown as (RawRow & { rank: number })[];
     }
 
     let results: SearchResult[] = rows.map((r) => ({ ...parseRow(r), score: r.rank }));
@@ -297,10 +297,8 @@ export class MemoryStore {
   list(opts: { limit?: number; tags?: string[] } = {}): Memory[] {
     const limit = opts.limit ?? 20;
     const rows = this.db
-      .prepare<[number]>(
-        "SELECT * FROM memories ORDER BY updated_at DESC LIMIT ?",
-      )
-      .all(limit) as RawRow[];
+      .prepare("SELECT * FROM memories ORDER BY updated_at DESC LIMIT ?")
+      .all(limit) as unknown as RawRow[];
 
     let results = rows.map(parseRow);
 
@@ -314,20 +312,18 @@ export class MemoryStore {
 
   stats(): { total: number; oldest: number | null; newest: number | null } {
     return this.db
-      .prepare<[], StatsRow>(
+      .prepare(
         "SELECT COUNT(*) as total, MIN(created_at) as oldest, MAX(created_at) as newest FROM memories",
       )
-      .get() as StatsRow;
+      .get() as unknown as StatsRow;
   }
 
   // ── Export / Import / Backup ──────────────────────────────────────────────
 
   exportAll(opts: { tags?: string[] } = {}): Memory[] {
     const rows = this.db
-      .prepare<[], RawRow>(
-        "SELECT * FROM memories ORDER BY created_at ASC",
-      )
-      .all() as RawRow[];
+      .prepare("SELECT * FROM memories ORDER BY created_at ASC")
+      .all() as unknown as RawRow[];
 
     let results = rows.map(parseRow);
 
@@ -351,21 +347,18 @@ export class MemoryStore {
     let imported = 0;
     let skipped = 0;
 
-    const insert = this.db.prepare<
-      [string, string, string | null, number, number, number, string | null]
-    >(
+    const insert = this.db.prepare(
       `INSERT INTO memories
          (id, content, tags, importance, created_at, updated_at, metadata)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
 
-    const run = this.db.transaction(() => {
+    this.db.exec("BEGIN");
+    try {
       for (const entry of entries) {
         const content = (entry.content ?? "").trim();
-        if (!content) {
-          skipped++;
-          continue;
-        }
+        if (!content) { skipped++; continue; }
+
         const now = Date.now();
         const tags = entry.tags ?? [];
         const importance = Math.min(1, Math.max(0, entry.importance ?? 0.5));
@@ -383,14 +376,22 @@ export class MemoryStore {
         );
         imported++;
       }
-    });
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
 
-    run();
     return { imported, skipped };
   }
 
-  async backup(destPath: string): Promise<void> {
-    await this.db.backup(destPath);
+  /**
+   * Checkpoint WAL into the main file, then copy the .db file to destPath.
+   * Safe for single-writer local usage.
+   */
+  backup(destPath: string): void {
+    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    copyFileSync(this.db.location as unknown as string, destPath);
   }
 
   close(): void {
