@@ -197,11 +197,12 @@ export class MemoryStore {
 
     const updated: Memory = {
       ...existing,
-      ...patch,
-      importance:
-        patch.importance !== undefined
-          ? Math.min(1, Math.max(0, patch.importance))
-          : existing.importance,
+      content:    patch.content   !== undefined ? patch.content             : existing.content,
+      tags:       patch.tags      !== undefined ? patch.tags                : existing.tags,
+      metadata:   patch.metadata  !== undefined ? patch.metadata            : existing.metadata,
+      importance: patch.importance !== undefined
+        ? Math.min(1, Math.max(0, patch.importance))
+        : existing.importance,
       updated_at: Date.now(),
     };
 
