@@ -1,10 +1,10 @@
 {
-  "name": "local-recall",
+  "name": "knol-local",
   "version": "0.1.0",
   "description": "Lightweight local memory layer for AI assistants — MCP server backed by SQLite + FTS5",
   "type": "module",
   "bin": {
-    "local-recall": "./dist/index.js"
+    "knol-local": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",

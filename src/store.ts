@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 // ── Paths ──────────────────────────────────────────────────────────────────
 
-const DEFAULT_DB_DIR = join(homedir(), ".local-recall");
+const DEFAULT_DB_DIR = join(homedir(), ".knol-local");
 const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, "memories.db");
 
 // ── Types ──────────────────────────────────────────────────────────────────

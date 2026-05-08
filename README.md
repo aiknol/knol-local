@@ -1,4 +1,4 @@
-# local-recall
+# knol-local
 
 A lightweight, fully local memory layer for AI assistants.  
 Stores memories in a SQLite database on your machine — no cloud, no accounts, no API keys.
@@ -9,7 +9,7 @@ Stores memories in a SQLite database on your machine — no cloud, no accounts, 
 - **Full-text search** via SQLite FTS5 with Porter stemming (`running` matches `run`, `ran`)
 - **BM25 ranking** weighted by per-memory importance scores
 - **Tags** for organising memories into categories
-- **Zero cloud dependencies** — everything lives in `~/.local-recall/memories.db`
+- **Zero cloud dependencies** — everything lives in `~/.knol-local/memories.db`
 - **Tiny footprint** — two runtime deps: `better-sqlite3` + MCP SDK
 
 ## Tools exposed to Claude
@@ -26,14 +26,14 @@ Stores memories in a SQLite database on your machine — no cloud, no accounts, 
 ## Installation
 
 ```bash
-npm install -g local-recall   # or: npx local-recall
+npm install -g knol-local   # or: npx knol-local
 ```
 
 Or clone and build locally:
 
 ```bash
-git clone https://github.com/your-org/local-recall
-cd local-recall
+git clone https://github.com/your-org/knol-local
+cd knol-local
 npm install
 npm run build
 ```
@@ -52,7 +52,7 @@ or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
   "mcpServers": {
     "memory": {
       "command": "npx",
-      "args": ["local-recall"]
+      "args": ["knol-local"]
     }
   }
 }
@@ -65,7 +65,7 @@ If you built from source, point directly at the binary:
   "mcpServers": {
     "memory": {
       "command": "node",
-      "args": ["/path/to/local-recall/dist/index.js"]
+      "args": ["/path/to/knol-local/dist/index.js"]
     }
   }
 }
@@ -80,7 +80,7 @@ Restart Claude Desktop — you'll see the memory tools appear in the tool list.
 Add the server to your Claude Code config:
 
 ```bash
-claude mcp add local-recall npx local-recall
+claude mcp add knol-local npx knol-local
 ```
 
 Or add it manually to `~/.claude/claude_code_config.json`:
@@ -90,7 +90,7 @@ Or add it manually to `~/.claude/claude_code_config.json`:
   "mcpServers": {
     "memory": {
       "command": "npx",
-      "args": ["local-recall"]
+      "args": ["knol-local"]
     }
   }
 }
@@ -102,7 +102,7 @@ Or add it manually to `~/.claude/claude_code_config.json`:
 
 | Environment variable | Default | Description |
 |----------------------|---------|-------------|
-| `LOCAL_RECALL_DB` | `~/.local-recall/memories.db` | Custom path for the SQLite database |
+| `KNOL_LOCAL_DB` | `~/.knol-local/memories.db` | Custom path for the SQLite database |
 
 Example — store memories in a project-specific file:
 
@@ -111,9 +111,9 @@ Example — store memories in a project-specific file:
   "mcpServers": {
     "memory": {
       "command": "npx",
-      "args": ["local-recall"],
+      "args": ["knol-local"],
       "env": {
-        "LOCAL_RECALL_DB": "/path/to/project/.memory.db"
+        "KNOL_LOCAL_DB": "/path/to/project/.memory.db"
       }
     }
   }
@@ -144,7 +144,7 @@ recall:   "monorepo tooling preferences"
 ## Database location
 
 ```
-~/.local-recall/
+~/.knol-local/
 └── memories.db        # SQLite database (WAL mode)
 ```
 

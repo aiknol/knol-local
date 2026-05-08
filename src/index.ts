@@ -13,7 +13,7 @@ import { MemoryStore } from "./store.js";
 
 // ── Config ─────────────────────────────────────────────────────────────────
 
-const dbPath = process.env["LOCAL_RECALL_DB"]; // optional override
+const dbPath = process.env["KNOL_LOCAL_DB"]; // optional override
 const store = new MemoryStore(dbPath);
 
 // ── Tool definitions ───────────────────────────────────────────────────────
@@ -160,7 +160,7 @@ function formatDate(ms: number | null): string {
 // ── Server ─────────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: "local-recall", version: "0.1.0" },
+  { name: "knol-local", version: "0.1.0" },
   { capabilities: { tools: {}, resources: {} } },
 );
 
