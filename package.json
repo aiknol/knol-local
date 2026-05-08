@@ -1,0 +1,28 @@
+{
+  "name": "local-recall",
+  "version": "0.1.0",
+  "description": "Lightweight local memory layer for AI assistants — MCP server backed by SQLite + FTS5",
+  "type": "module",
+  "bin": {
+    "local-recall": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js"
+  },
+  "keywords": ["mcp", "memory", "claude", "sqlite", "local", "ai-assistant"],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
