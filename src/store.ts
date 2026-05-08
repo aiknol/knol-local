@@ -88,6 +88,13 @@ export class MemoryStore {
   // ── Schema ───────────────────────────────────────────────────────────────
 
   private migrate(): void {
+    // Drop old triggers that used the FTS5 'delete' command (incompatible with
+    // non-external-content tables). Idempotent — safe to run on every startup.
+    this.db.exec(`
+      DROP TRIGGER IF EXISTS memories_ad;
+      DROP TRIGGER IF EXISTS memories_au;
+    `);
+
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS memories (
         id          TEXT    PRIMARY KEY,
@@ -117,14 +124,12 @@ export class MemoryStore {
 
       CREATE TRIGGER IF NOT EXISTS memories_ad
         AFTER DELETE ON memories BEGIN
-          INSERT INTO memories_fts(memories_fts, rowid, id, content, tags)
-          VALUES ('delete', old.rowid, old.id, old.content, COALESCE(old.tags, ''));
+          DELETE FROM memories_fts WHERE rowid = old.rowid;
         END;
 
       CREATE TRIGGER IF NOT EXISTS memories_au
         AFTER UPDATE ON memories BEGIN
-          INSERT INTO memories_fts(memories_fts, rowid, id, content, tags)
-          VALUES ('delete', old.rowid, old.id, old.content, COALESCE(old.tags, ''));
+          DELETE FROM memories_fts WHERE rowid = old.rowid;
           INSERT INTO memories_fts(rowid, id, content, tags)
           VALUES (new.rowid, new.id, new.content, COALESCE(new.tags, ''));
         END;
