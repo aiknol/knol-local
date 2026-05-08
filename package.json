@@ -1,7 +1,7 @@
 {
   "name": "knol-local",
-  "version": "0.2.2",
-  "description": "Lightweight local memory layer for AI assistants — MCP server backed by SQLite + FTS5",
+  "version": "0.2.3",
+  "description": "Lightweight local memory layer for AI assistants — MCP server + HTTP API + CLI, backed by SQLite + FTS5. Works with Claude, Cursor, and Codex.",
   "type": "module",
   "bin": {
     "knol-local": "./dist/index.js"
@@ -15,11 +15,27 @@
     "mcp",
     "memory",
     "claude",
+    "cursor",
+    "codex",
     "sqlite",
+    "fts5",
     "local",
-    "ai-assistant"
+    "ai-assistant",
+    "ai-memory",
+    "llm",
+    "model-context-protocol",
+    "knol"
   ],
   "license": "MIT",
+  "homepage": "https://github.com/aiknol/knol-local#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aiknol/knol-local.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aiknol/knol-local/issues"
+  },
+  "author": "aiknol",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^11.0.0"
