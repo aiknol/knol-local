@@ -1,6 +1,6 @@
 {
   "name": "knol-local",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Lightweight local memory layer for AI assistants — MCP server backed by SQLite + FTS5",
   "type": "module",
   "bin": {

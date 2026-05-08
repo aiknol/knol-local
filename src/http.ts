@@ -1,7 +1,9 @@
 import * as http from "node:http";
+import { createRequire } from "node:module";
 import { MemoryStore } from "./store.js";
 
-const VERSION = "0.2.0";
+const _require = createRequire(import.meta.url);
+const VERSION: string = (_require("../package.json") as { version: string }).version;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
