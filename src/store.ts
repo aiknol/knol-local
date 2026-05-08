@@ -319,6 +319,79 @@ export class MemoryStore {
       .get() as StatsRow;
   }
 
+  // ── Export / Import / Backup ──────────────────────────────────────────────
+
+  exportAll(opts: { tags?: string[] } = {}): Memory[] {
+    const rows = this.db
+      .prepare<[], RawRow>(
+        "SELECT * FROM memories ORDER BY created_at ASC",
+      )
+      .all() as RawRow[];
+
+    let results = rows.map(parseRow);
+
+    if (opts.tags && opts.tags.length > 0) {
+      const filterTags = opts.tags;
+      results = results.filter((m) => filterTags.some((t) => m.tags.includes(t)));
+    }
+
+    return results;
+  }
+
+  importAll(
+    entries: Array<{
+      content: string;
+      tags?: string[];
+      importance?: number;
+      metadata?: Record<string, unknown>;
+      created_at?: number;
+    }>,
+  ): { imported: number; skipped: number } {
+    let imported = 0;
+    let skipped = 0;
+
+    const insert = this.db.prepare<
+      [string, string, string | null, number, number, number, string | null]
+    >(
+      `INSERT INTO memories
+         (id, content, tags, importance, created_at, updated_at, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+
+    const run = this.db.transaction(() => {
+      for (const entry of entries) {
+        const content = (entry.content ?? "").trim();
+        if (!content) {
+          skipped++;
+          continue;
+        }
+        const now = Date.now();
+        const tags = entry.tags ?? [];
+        const importance = Math.min(1, Math.max(0, entry.importance ?? 0.5));
+        const created_at = entry.created_at ?? now;
+        const metadata = entry.metadata ?? {};
+
+        insert.run(
+          randomUUID(),
+          content,
+          tags.length > 0 ? JSON.stringify(tags) : null,
+          importance,
+          created_at,
+          now,
+          Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null,
+        );
+        imported++;
+      }
+    });
+
+    run();
+    return { imported, skipped };
+  }
+
+  async backup(destPath: string): Promise<void> {
+    await this.db.backup(destPath);
+  }
+
   close(): void {
     this.db.close();
   }
