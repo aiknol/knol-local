@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { ensureBetterSqlite3, getPackageDir } from './auto-setup.js';
 
 // ── Shared interface ───────────────────────────────────────────────────────
 
@@ -53,15 +54,34 @@ export const openDb: (path: string) => Db = await (async (): Promise<(path: stri
   // ── better-sqlite3 fallback (Node 18+) ───────────────────────────────────
   const _require = createRequire(import.meta.url);
   let BetterSqlite3: any;
+
+  const tryLoad = () => { BetterSqlite3 = _require('better-sqlite3'); };
+
   try {
-    BetterSqlite3 = _require('better-sqlite3');
-  } catch {
-    const nodeVer = process.versions.node;
-    throw new Error(
-      `knol-local requires SQLite but none is available.\n` +
-      `  Node ${nodeVer} does not include node:sqlite (requires Node ≥ 22.5).\n` +
-      `  better-sqlite3 is also missing. Try reinstalling: npm install -g knol-local`,
-    );
+    tryLoad();
+  } catch (firstErr) {
+    // The binary may be missing or compiled for a different Node ABI.
+    // Attempt a fresh install before giving up.
+    const msg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+    const isAbiMismatch = msg.includes('NODE_MODULE_VERSION') || msg.includes('was compiled against');
+    const isMissing     = msg.includes('Cannot find module');
+
+    if (isAbiMismatch || isMissing) {
+      const ok = ensureBetterSqlite3(getPackageDir());
+      if (ok) {
+        try { tryLoad(); } catch { /* fall through to error below */ }
+      }
+    }
+
+    if (!BetterSqlite3) {
+      const nodeVer = process.versions.node;
+      throw new Error(
+        `knol-local: SQLite is not available.\n` +
+        `  Node ${nodeVer} does not include node:sqlite (requires Node ≥ 22.5).\n` +
+        `  better-sqlite3 could not be loaded or installed automatically.\n` +
+        `  Fix: npm install -g knol-local`,
+      );
+    }
   }
 
   return (path: string): Db => {

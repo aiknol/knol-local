@@ -1,6 +1,6 @@
 {
   "name": "knol-local",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Lightweight local memory layer for AI assistants — MCP server + HTTP API + CLI, backed by SQLite + FTS5. Works with Claude, Cursor, and Codex.",
   "type": "module",
   "bin": {
@@ -9,7 +9,8 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "postinstall": "node setup.mjs"
   },
   "keywords": [
     "mcp",

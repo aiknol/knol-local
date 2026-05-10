@@ -4,6 +4,13 @@ import * as os from "node:os";
 import * as readline from "node:readline";
 import { MemoryStore, type Memory, type SearchResult } from "./store.js";
 import { startHttpServer } from "./http.js";
+import {
+  autoSetupMcpConfigs,
+  setupClient,
+  claudeDesktopConfigPath,
+  cursorConfigPath,
+  type ConfigResult,
+} from "./auto-setup.js";
 
 // ── ANSI colours ────────────────────────────────────────────────────────────
 
@@ -220,80 +227,111 @@ async function cmdRestore(store: MemoryStore, args: string[]): Promise<void> {
   console.log(green(`Restored database from ${file}`));
 }
 
+function printConfigResult(r: ConfigResult): void {
+  const icon =
+    r.action === "added"              ? green("✓") :
+    r.action === "created"            ? green("✓") :
+    r.action === "updated"            ? green("✓") :
+    r.action === "already-configured" ? dim("·") :
+    r.action === "skipped"            ? dim("–") :
+    /* error */                         red("✗");
+
+  const desc =
+    r.action === "added"              ? "added MCP entry" :
+    r.action === "created"            ? "created config with MCP entry" :
+    r.action === "updated"            ? "updated MCP entry" :
+    r.action === "already-configured" ? "already configured" :
+    r.action === "skipped"            ? "not found — skipped" :
+    /* error */                         `error: ${r.detail ?? "unknown"}`;
+
+  console.log(`  ${icon}  ${bold(r.label)}: ${desc}`);
+  if (r.action !== "skipped" && r.action !== "error") {
+    console.log(`     ${dim(r.path)}`);
+  }
+}
+
 function cmdSetup(args: string[]): void {
   const { positional, flags } = parseArgs(args);
   const target = positional[0] ?? "";
   const httpPort = flags["http-port"] ?? "3001";
-  const mcpConfig = JSON.stringify(
-    {
-      mcpServers: {
-        "knol-local": {
-          command: "knol-local",
-        },
-      },
-    },
-    null,
-    2,
-  );
 
-  switch (target) {
-    case "claude": {
-      const configPath = path.join(
-        os.homedir(),
-        "Library",
-        "Application Support",
-        "Claude",
-        "claude_desktop_config.json",
-      );
-      console.log(bold("\nClaude Desktop setup:\n"));
-      console.log(`Config file: ${cyan(configPath)}`);
-      console.log("\nAdd this to your claude_desktop_config.json:\n");
-      console.log(mcpConfig);
-      console.log(
-        dim(
-          "\nIf the file doesn't exist, create it with the JSON above. Then restart Claude Desktop.",
-        ),
-      );
-      break;
-    }
-    case "cursor": {
-      const configPath = path.join(os.homedir(), ".cursor", "mcp.json");
-      console.log(bold("\nCursor setup:\n"));
-      console.log(`Config file: ${cyan(configPath)}`);
-      console.log("\nAdd this to your ~/.cursor/mcp.json:\n");
-      console.log(mcpConfig);
-      console.log(dim("\nRestart Cursor after saving."));
-      break;
-    }
-    case "codex": {
-      console.log(bold("\nCodex / ChatGPT setup:\n"));
-      console.log("Codex does not support MCP directly. Use the HTTP API instead:");
-      console.log();
-      console.log(`  1. Start the HTTP server:`);
-      console.log(cyan(`       knol-local serve --port ${httpPort}`));
-      console.log();
-      console.log(`  2. Use the REST API at:`);
-      console.log(cyan(`       http://localhost:${httpPort}/memories`));
-      console.log();
-      console.log("  Available endpoints:");
-      console.log(dim(`    GET    /health`));
-      console.log(dim(`    GET    /memories?limit=20&tags=x,y`));
-      console.log(dim(`    POST   /memories           { content, tags?, importance? }`));
-      console.log(dim(`    GET    /memories/search?q=query`));
-      console.log(dim(`    GET    /memories/stats`));
-      console.log(dim(`    GET    /memories/:id`));
-      console.log(dim(`    PATCH  /memories/:id`));
-      console.log(dim(`    DELETE /memories/:id`));
-      console.log(dim(`    GET    /export`));
-      console.log(dim(`    POST   /import             { memories[] }`));
-      break;
-    }
-    default:
-      console.log(bold("\nUsage:"));
-      console.log("  knol-local setup claude    — Claude Desktop MCP config");
-      console.log("  knol-local setup cursor    — Cursor MCP config");
-      console.log("  knol-local setup codex     — HTTP API instructions for Codex/ChatGPT");
+  // ── codex: HTTP-only, show instructions ───────────────────────────────────
+  if (target === "codex") {
+    console.log(bold("\nCodex / ChatGPT setup:\n"));
+    console.log("Codex does not support MCP. Use the built-in HTTP API instead:");
+    console.log();
+    console.log(`  1. Start the HTTP server:`);
+    console.log(cyan(`       knol-local serve --port ${httpPort}`));
+    console.log();
+    console.log(`  2. Point Codex at ${cyan(`http://localhost:${httpPort}`)}`);
+    console.log();
+    console.log(dim("  Endpoints: GET /memories  POST /memories  GET /memories/search"));
+    console.log(dim("             GET /export    POST /import    GET /health"));
+    console.log();
+    return;
   }
+
+  // ── claude-code / code: show `claude mcp add` command ────────────────────
+  if (target === "claude-code" || target === "code") {
+    console.log(bold("\nClaude Code (CLI) setup:\n"));
+    console.log("  Run this once in your terminal:");
+    console.log();
+    console.log(cyan("    claude mcp add knol-local knol-local"));
+    console.log();
+    console.log(dim("  Or set it per-project in .claude/settings.json:"));
+    console.log(dim('    { "mcpServers": { "knol-local": { "command": "knol-local" } } }'));
+    console.log();
+    return;
+  }
+
+  // ── explicit single target ─────────────────────────────────────────────────
+  if (target === "claude" || target === "cursor") {
+    const label = target === "claude" ? "Claude Desktop" : "Cursor";
+    console.log(bold(`\n${label} setup:\n`));
+    const r = setupClient(target);
+    printConfigResult(r);
+
+    if (r.action === "already-configured") {
+      console.log(dim(`\n  No changes needed — knol-local is already in the config.`));
+    } else if (r.action === "added" || r.action === "created" || r.action === "updated") {
+      const restartNote = target === "claude"
+        ? "Restart Claude Desktop to load the new MCP server."
+        : "Restart Cursor to load the new MCP server.";
+      console.log(`\n  ${restartNote}`);
+    } else if (r.action === "error") {
+      console.log(`\n  ${dim("You can add the entry manually:")}`);
+      console.log(JSON.stringify({ mcpServers: { "knol-local": { command: "knol-local" } } }, null, 2));
+    }
+    console.log();
+    return;
+  }
+
+  // ── no target: auto-detect and configure all ─────────────────────────────
+  console.log(bold("\nAuto-configuring MCP clients…\n"));
+  const results = autoSetupMcpConfigs();
+  for (const r of results) printConfigResult(r);
+
+  const changed = results.filter(r => r.action === "added" || r.action === "updated" || r.action === "created");
+  const skipped = results.filter(r => r.action === "skipped");
+
+  if (changed.length > 0) {
+    console.log(`\n  ${green("Done.")} Restart the configured app(s) to activate knol-local.`);
+  } else if (skipped.length === results.length) {
+    // No config files found at all
+    console.log(`\n  ${dim("No existing config files found.")} Run one of:`);
+    console.log(cyan("    knol-local setup claude      # Claude Desktop"));
+    console.log(cyan("    knol-local setup cursor      # Cursor"));
+    console.log(cyan("    knol-local setup claude-code # Claude Code CLI"));
+    console.log(cyan("    knol-local setup codex       # Codex / HTTP API"));
+  } else {
+    console.log(`\n  ${dim("All found configs are already up to date.")}`);
+  }
+
+  // Always show the config paths so the user can verify
+  console.log();
+  console.log(dim("  Config file locations searched:"));
+  console.log(dim(`    Claude Desktop : ${claudeDesktopConfigPath()}`));
+  console.log(dim(`    Cursor         : ${cursorConfigPath()}`));
   console.log();
 }
 
@@ -325,7 +363,7 @@ ${bold("Commands:")}
   import <file>                              Import memories from JSON
   backup [--out <dir>]                       Backup database file
   restore <file>                             Restore database from backup
-  setup <claude|cursor|codex> [--http-port]  Print setup instructions
+  setup [claude|cursor|codex|claude-code]    Auto-configure MCP clients
   serve [--port 3001] [--key <apikey>]       Start HTTP REST server
   help                                       Show this help
 
