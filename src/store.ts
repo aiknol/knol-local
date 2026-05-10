@@ -1,8 +1,8 @@
-import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { openDb, type Db } from "./sqlite.js";
 
 // ── Paths ──────────────────────────────────────────────────────────────────
 
@@ -71,11 +71,11 @@ function toFtsQuery(raw: string): string {
 // ── Store ──────────────────────────────────────────────────────────────────
 
 export class MemoryStore {
-  private readonly db: DatabaseSync;
+  private readonly db: Db;
 
   constructor(dbPath: string = DEFAULT_DB_PATH) {
     mkdirSync(join(dbPath, ".."), { recursive: true });
-    this.db = new DatabaseSync(dbPath);
+    this.db = openDb(dbPath);
 
     // Performance pragmas — safe for single-writer local use
     this.db.exec("PRAGMA journal_mode = WAL");
@@ -391,7 +391,7 @@ export class MemoryStore {
    */
   backup(destPath: string): void {
     this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-    copyFileSync(this.db.location as unknown as string, destPath);
+    copyFileSync(this.db.location, destPath);
   }
 
   close(): void {
