@@ -13,13 +13,33 @@
  *   node /path/to/knol-local/setup.mjs
  */
 
-import { existsSync } from "node:fs";
+import { openSync, writeSync, closeSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Use stderr for all output — npm suppresses postinstall stdout in many
-// environments (npm 7+, non-TTY, CI) but always forwards stderr.
-const log = (msg) => process.stderr.write(msg + "\n");
+// ── Terminal output ────────────────────────────────────────────────────────────
+//
+// npm 7+ pipes lifecycle script stdio and only surfaces it on failure, so
+// process.stdout and process.stderr are both suppressed.  Writing directly to
+// /dev/tty bypasses npm's capture and always reaches the user's terminal.
+// On Windows (no /dev/tty) we fall back to stderr.
+
+let ttyFd = -1;
+try {
+  if (process.platform !== "win32") ttyFd = openSync("/dev/tty", "w");
+} catch { /* /dev/tty unavailable (CI, docker, etc.) — fall back to stderr */ }
+
+function log(msg) {
+  const line = msg + "\n";
+  try {
+    if (ttyFd >= 0) { writeSync(ttyFd, line); return; }
+  } catch { /* fall through */ }
+  process.stderr.write(line);
+}
+
+function closeTty() {
+  if (ttyFd >= 0) { try { closeSync(ttyFd); } catch {} ttyFd = -1; }
+}
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -53,7 +73,7 @@ try {
 const autoSetupPath = join(__dir, "dist", "auto-setup.js");
 
 // Skip silently if the package hasn't been compiled yet (e.g. fresh clone).
-if (!existsSync(autoSetupPath)) process.exit(0);
+if (!existsSync(autoSetupPath)) { closeTty(); process.exit(0); }
 
 try {
   const { autoSetupMcpConfigs } = await import(autoSetupPath);
@@ -88,3 +108,5 @@ try {
 } catch {
   // Never let postinstall failures surface — they'd break the npm install UX.
 }
+
+closeTty();
