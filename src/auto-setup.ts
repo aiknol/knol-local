@@ -234,9 +234,8 @@ export interface HookResult {
 export function setupClaudeCodeHooks(): HookResult {
   const settingsPath = join(homedir(), ".claude", "settings.json");
   const entry = buildMcpEntry();
-  // Hook command: pipe PostCompact stdin → knol-local capture
-  const hookCmd =
-    `${entry.command} ${entry.args[0]} capture 2>/dev/null || true`;
+  // Hook command: PostCompact stdin → knol-local capture
+  const hookCmd = `${entry.command} ${entry.args[0]} capture 2>/dev/null || true`;
 
   try {
     let settings: Record<string, unknown> = {};
@@ -247,7 +246,6 @@ export function setupClaudeCodeHooks(): HookResult {
       // File doesn't exist yet — start fresh
     }
 
-    // Navigate to hooks.PostCompact array
     if (!settings["hooks"] || typeof settings["hooks"] !== "object") {
       settings["hooks"] = {};
     }
@@ -258,18 +256,34 @@ export function setupClaudeCodeHooks(): HookResult {
     }
     const postCompact = hooks["PostCompact"] as Array<Record<string, unknown>>;
 
-    // Check if our hook is already present
-    const alreadyPresent = postCompact.some((entry) => {
-      const innerHooks = Array.isArray(entry["hooks"]) ? entry["hooks"] as Array<Record<string, unknown>> : [];
-      return innerHooks.some((h) => String(h["command"] ?? "").includes("knol-local") && String(h["command"] ?? "").includes("capture"));
-    });
+    // Find any existing knol-local capture hook entry
+    let existingEntryIdx = -1;
+    let existingHookIdx  = -1;
+    for (let i = 0; i < postCompact.length; i++) {
+      const innerHooks = Array.isArray(postCompact[i]!["hooks"])
+        ? (postCompact[i]!["hooks"] as Array<Record<string, unknown>>)
+        : [];
+      const j = innerHooks.findIndex(
+        (h) => String(h["command"] ?? "").includes("knol-local") &&
+               String(h["command"] ?? "").includes("capture"),
+      );
+      if (j !== -1) { existingEntryIdx = i; existingHookIdx = j; break; }
+    }
 
-    if (alreadyPresent) return { action: "already-configured" };
-
-    // Add our hook entry (no matcher = fires for both manual and auto compaction)
-    postCompact.push({
-      hooks: [{ type: "command", command: hookCmd, timeout: 30 }],
-    });
+    if (existingEntryIdx !== -1) {
+      // Already present — check if the command points to the current binary
+      const existing = postCompact[existingEntryIdx]!;
+      const existingHook = (existing["hooks"] as Array<Record<string, unknown>>)[existingHookIdx]!;
+      if (String(existingHook["command"]) === hookCmd) {
+        return { action: "already-configured" };
+      }
+      // Stale path (e.g. after global reinstall) — update in place
+      existingHook["command"] = hookCmd;
+    } else {
+      postCompact.push({
+        hooks: [{ type: "command", command: hookCmd, timeout: 30 }],
+      });
+    }
 
     mkdirSync(dirname(settingsPath), { recursive: true });
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
