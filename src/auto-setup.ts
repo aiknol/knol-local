@@ -1,10 +1,12 @@
 /**
  * auto-setup.ts
  *
- * Two responsibilities:
+ * Three responsibilities:
  *  1. Write / patch MCP server entries into Claude Desktop and Cursor config files.
  *  2. Ensure better-sqlite3 is installed and usable (auto-install when missing or
  *     when the prebuilt binary was compiled for a different Node ABI).
+ *  3. Install PostCompact hook in Claude Code (~/.claude/settings.json) so that
+ *     session memories are captured automatically on context compaction.
  *
  * This module is imported by:
  *   - setup.mjs   (postinstall — runs after `npm install -g knol-local`)
@@ -213,4 +215,67 @@ export function ensureBetterSqlite3(pkgDir: string): boolean {
 /** Derive the knol-local package root from this module's location (dist/auto-setup.js → package root). */
 export function getPackageDir(): string {
   return join(dirname(fileURLToPath(import.meta.url)), "..");
+}
+
+// ── Claude Code hook setup ─────────────────────────────────────────────────
+
+export interface HookResult {
+  action: "added" | "already-configured" | "error";
+  detail?: string;
+}
+
+/**
+ * Install a PostCompact hook in ~/.claude/settings.json so that knol-local
+ * automatically captures session memories whenever Claude Code compacts context.
+ *
+ * The hook pipes the PostCompact JSON (which contains the session summary) into
+ * `knol-local capture`, which extracts and stores individual memories.
+ */
+export function setupClaudeCodeHooks(): HookResult {
+  const settingsPath = join(homedir(), ".claude", "settings.json");
+  const entry = buildMcpEntry();
+  // Hook command: pipe PostCompact stdin → knol-local capture
+  const hookCmd =
+    `${entry.command} ${entry.args[0]} capture 2>/dev/null || true`;
+
+  try {
+    let settings: Record<string, unknown> = {};
+    try {
+      const raw = readFileSync(settingsPath, "utf8").trim();
+      if (raw) settings = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      // File doesn't exist yet — start fresh
+    }
+
+    // Navigate to hooks.PostCompact array
+    if (!settings["hooks"] || typeof settings["hooks"] !== "object") {
+      settings["hooks"] = {};
+    }
+    const hooks = settings["hooks"] as Record<string, unknown>;
+
+    if (!Array.isArray(hooks["PostCompact"])) {
+      hooks["PostCompact"] = [];
+    }
+    const postCompact = hooks["PostCompact"] as Array<Record<string, unknown>>;
+
+    // Check if our hook is already present
+    const alreadyPresent = postCompact.some((entry) => {
+      const innerHooks = Array.isArray(entry["hooks"]) ? entry["hooks"] as Array<Record<string, unknown>> : [];
+      return innerHooks.some((h) => String(h["command"] ?? "").includes("knol-local") && String(h["command"] ?? "").includes("capture"));
+    });
+
+    if (alreadyPresent) return { action: "already-configured" };
+
+    // Add our hook entry (no matcher = fires for both manual and auto compaction)
+    postCompact.push({
+      hooks: [{ type: "command", command: hookCmd, timeout: 30 }],
+    });
+
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
+
+    return { action: "added" };
+  } catch (err) {
+    return { action: "error", detail: err instanceof Error ? err.message : String(err) };
+  }
 }

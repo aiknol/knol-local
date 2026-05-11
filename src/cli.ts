@@ -7,10 +7,12 @@ import { startHttpServer } from "./http.js";
 import {
   autoSetupMcpConfigs,
   setupClient,
+  setupClaudeCodeHooks,
   claudeDesktopConfigPath,
   cursorConfigPath,
   type ConfigResult,
 } from "./auto-setup.js";
+import { extractMemories } from "./extractor.js";
 
 // ── ANSI colours ────────────────────────────────────────────────────────────
 
@@ -291,16 +293,34 @@ function cmdSetup(args: string[]): void {
     return;
   }
 
-  // ── claude-code / code: show `claude mcp add` command ────────────────────
+  // ── claude-code / code: install MCP + PostCompact hook ───────────────────
   if (target === "claude-code" || target === "code") {
     console.log(bold("\nClaude Code (CLI) setup:\n"));
-    console.log("  Run this once in your terminal:");
+    console.log("  Step 1 — Add the MCP server (run once in your terminal):");
     console.log();
     console.log(cyan("    claude mcp add knol-local knol-local"));
     console.log();
-    console.log(dim("  Or set it per-project in .claude/settings.json:"));
-    console.log(dim('    { "mcpServers": { "knol-local": { "command": "knol-local" } } }'));
+
+    // Install PostCompact hook automatically
+    console.log("  Step 2 — Installing auto-capture hook in ~/.claude/settings.json…");
+    const hookResult = setupClaudeCodeHooks();
+    if (hookResult.action === "added") {
+      console.log(green("  ✓ PostCompact hook installed."));
+      console.log(dim("    Session memories will be captured automatically on context compaction."));
+    } else if (hookResult.action === "already-configured") {
+      console.log(dim("  · Hook already installed — nothing to change."));
+    } else {
+      console.log(red(`  ✗ Hook install failed: ${hookResult.detail ?? "unknown error"}`));
+    }
     console.log();
+
+    // Tip: set API key for LLM extraction
+    const hasKey = !!(process.env["ANTHROPIC_API_KEY"] ?? process.env["OPENAI_API_KEY"]);
+    if (!hasKey) {
+      console.log(dim("  Tip: set ANTHROPIC_API_KEY or OPENAI_API_KEY in your environment"));
+      console.log(dim("  for smart LLM extraction. Without a key, raw summaries are stored."));
+      console.log();
+    }
     return;
   }
 
@@ -319,6 +339,16 @@ function cmdSetup(args: string[]): void {
       console.log(`\n  ${dim("You can add the entry manually:")}`);
       console.log(JSON.stringify({ mcpServers: { "knol-local": { command: "knol-local" } } }, null, 2));
     }
+
+    // Auto-capture instructions
+    const settingsLabel = target === "claude"
+      ? "Claude Desktop → Settings → Profile → Custom Instructions"
+      : "Cursor → Settings → Rules for AI";
+    console.log();
+    console.log(bold("  For automatic memory capture, add this to your custom instructions:"));
+    console.log(cyan(`    At the end of every conversation, call capture_session from knol-local`));
+    console.log(cyan(`    with a summary of what was discussed.`));
+    console.log(dim(`  (${settingsLabel})`));
     console.log();
     return;
   }
@@ -363,6 +393,49 @@ function cmdServe(store: MemoryStore, args: string[]): void {
   }
 }
 
+async function cmdCapture(store: MemoryStore, args: string[]): Promise<void> {
+  const { positional } = parseArgs(args);
+  let text = positional.join(" ").trim();
+
+  // If no inline text, read from stdin (e.g. piped from a hook)
+  if (!text) {
+    if (process.stdin.isTTY) {
+      console.error(red("Error: provide text as argument or pipe from stdin"));
+      process.exit(1);
+    }
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin as AsyncIterable<Buffer>) chunks.push(chunk);
+    const raw = Buffer.concat(chunks).toString("utf8").trim();
+
+    // Accept raw text or hook JSON (PostCompact sends {summary: "..."})
+    try {
+      const json = JSON.parse(raw) as Record<string, unknown>;
+      text = String(json["summary"] ?? json["content"] ?? json["text"] ?? raw);
+    } catch {
+      text = raw;
+    }
+  }
+
+  if (!text) {
+    console.error(red("Error: nothing to capture"));
+    process.exit(1);
+  }
+
+  const extracted = await extractMemories(text);
+  if (extracted.length === 0) {
+    console.log(dim("  Nothing extracted."));
+    return;
+  }
+
+  for (const m of extracted) {
+    store.add(m.content, { tags: m.tags, importance: m.importance });
+  }
+
+  const apiKey = process.env["ANTHROPIC_API_KEY"] ?? process.env["OPENAI_API_KEY"];
+  const method = apiKey ? "LLM extraction" : "raw";
+  console.log(green(`Captured ${extracted.length} memories`) + dim(` (${method})`));
+}
+
 function cmdHelp(): void {
   console.log(`
 ${bold("knol-local")} — local memory for AI assistants
@@ -379,6 +452,8 @@ ${bold("Commands:")}
   search <query> [--limit <n>]                Full-text search
          [--tag t1,t2]
   stats                                       Show summary statistics
+  capture [text | < stdin]                    Extract & store memories from
+                                              a session summary (auto-backup)
   export [--out <file>]                       Export all memories as JSON
   import <file>                               Import memories from JSON
   backup [--out <dir>]                        Backup database file
@@ -431,6 +506,7 @@ export async function runCli(args: string[], store: MemoryStore): Promise<void> 
     case "restore": await cmdRestore(store, rest); break;
     case "setup":   cmdSetup(rest); break;
     case "serve":   cmdServe(store, rest); break;
+    case "capture": await cmdCapture(store, rest); break;
     case "help":
     default:        cmdHelp(); break;
   }

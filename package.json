@@ -1,6 +1,6 @@
 {
   "name": "knol-local",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "description": "Lightweight local memory layer for AI assistants — MCP server + HTTP API + CLI, backed by SQLite + FTS5. Works with Claude, Cursor, and Codex.",
   "type": "module",
   "bin": {

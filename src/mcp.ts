@@ -3,17 +3,20 @@
 import { createRequire } from "node:module";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-
-const _require = createRequire(import.meta.url);
-const VERSION: string = (_require("../package.json") as { version: string }).version;
 import {
   CallToolRequestSchema,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
   ListResourcesRequestSchema,
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { MemoryStore } from "./store.js";
+import { extractMemories } from "./extractor.js";
+
+const _require = createRequire(import.meta.url);
+const VERSION: string = (_require("../package.json") as { version: string }).version;
 
 // ── Config ─────────────────────────────────────────────────────────────────
 
@@ -145,6 +148,28 @@ const TOOLS: Tool[] = [
     description: "Return summary statistics: total memories stored, oldest and newest timestamps.",
     inputSchema: { type: "object", properties: {} },
   },
+  {
+    name: "capture_session",
+    description:
+      "Automatically extract and store important memories from this conversation. " +
+      "Call this at the END of every session with a summary of what was discussed — " +
+      "topics, decisions, user preferences, technical details, and any context worth " +
+      "remembering. knol-local will parse it into individual searchable memories. " +
+      "If ANTHROPIC_API_KEY or OPENAI_API_KEY is set, an LLM extracts structured facts; " +
+      "otherwise the summary is stored as-is.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        summary: {
+          type: "string",
+          description:
+            "Everything worth remembering from this session: topics covered, decisions made, " +
+            "user preferences or requirements mentioned, project context, technical details.",
+        },
+      },
+      required: ["summary"],
+    },
+  },
 ];
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -165,7 +190,7 @@ function formatDate(ms: number | null): string {
 
 const server = new Server(
   { name: "knol-local", version: VERSION },
-  { capabilities: { tools: {}, resources: {} } },
+  { capabilities: { tools: {}, resources: {}, prompts: {} } },
 );
 
 // ── Tools handler ──────────────────────────────────────────────────────────
@@ -256,6 +281,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         });
       }
 
+      // ── capture_session ───────────────────────────────────────────────────
+      case "capture_session": {
+        const summary = String(a["summary"] ?? "").trim();
+        if (!summary) throw new Error("summary must not be empty");
+
+        const extracted = await extractMemories(summary);
+        if (extracted.length === 0) {
+          return text({ captured: 0, hint: "Nothing extracted — summary may be too short." });
+        }
+
+        const stored = extracted.map((m) =>
+          store.add(m.content, { tags: m.tags, importance: m.importance }),
+        );
+
+        return text({ captured: stored.length, memories: stored });
+      }
+
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -265,6 +307,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       isError: true,
     };
   }
+});
+
+// ── Prompts ────────────────────────────────────────────────────────────────
+
+const AUTO_CAPTURE_PROMPT = `\
+At the end of this conversation, call the capture_session tool from knol-local with a \
+comprehensive summary of everything we discussed. Include: topics covered, decisions made, \
+user preferences or requirements mentioned, technical details, and any context worth \
+remembering for future sessions. This creates persistent memory so our next conversation \
+can continue where this one left off.`;
+
+server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+  prompts: [
+    {
+      name: "auto-capture",
+      description:
+        "Instructs Claude to call capture_session at the end of this conversation, " +
+        "automatically saving important context to knol-local memory.",
+    },
+  ],
+}));
+
+server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+  if (request.params.name !== "auto-capture") {
+    throw new Error(`Unknown prompt: ${request.params.name}`);
+  }
+  return {
+    description: "Auto-capture session memories via knol-local",
+    messages: [
+      { role: "user", content: { type: "text", text: AUTO_CAPTURE_PROMPT } },
+    ],
+  };
 });
 
 // ── Resources ──────────────────────────────────────────────────────────────

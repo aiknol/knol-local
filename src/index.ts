@@ -21,7 +21,7 @@ const { startMcpServer } = await import("./mcp.js");
 // ── Dispatch ────────────────────────────────────────────────────────────────
 
 const CLI_COMMANDS = new Set([
-  "list", "add", "search", "stats", "export", "import",
+  "list", "add", "search", "stats", "capture", "export", "import",
   "backup", "restore", "setup", "serve", "help",
 ]);
 
