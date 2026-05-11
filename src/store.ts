@@ -7,7 +7,7 @@ import { openDb, type Db } from "./sqlite.js";
 // ── Paths ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_DB_DIR = join(homedir(), ".knol-local");
-const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, "memories.db");
+export const DEFAULT_DB_PATH = join(DEFAULT_DB_DIR, "memories.db");
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -56,6 +56,18 @@ function parseRow(row: RawRow): Memory {
 }
 
 /**
+ * Build an AND clause + params to filter by any of the given tags (OR semantics).
+ * Uses json_each so the limit is applied after tag filtering, not before.
+ */
+function tagWhere(tags: string[], col = "tags"): { clause: string; params: string[] } {
+  const placeholders = tags.map(() => "?").join(", ");
+  return {
+    clause: `AND EXISTS (SELECT 1 FROM json_each(${col}) WHERE value IN (${placeholders}))`,
+    params: tags,
+  };
+}
+
+/**
  * Sanitize a free-text query into a safe FTS5 MATCH expression.
  * Each whitespace-separated token is quoted to prevent injection via
  * FTS5 syntax operators (AND / OR / NOT / * / NEAR / ^).
@@ -78,9 +90,11 @@ export class MemoryStore {
     this.db = openDb(dbPath);
 
     // Performance pragmas — safe for single-writer local use
-    this.db.exec("PRAGMA journal_mode = WAL");
-    this.db.exec("PRAGMA synchronous  = NORMAL");
-    this.db.exec("PRAGMA foreign_keys = ON");
+    this.db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA synchronous  = NORMAL;
+      PRAGMA foreign_keys = ON;
+    `);
 
     this.migrate();
   }
@@ -114,6 +128,10 @@ export class MemoryStore {
         tags,
         tokenize = 'porter unicode61'
       );
+
+      -- Indexes for sort columns used in list() and exportAll()
+      CREATE INDEX IF NOT EXISTS memories_updated_at ON memories(updated_at DESC);
+      CREATE INDEX IF NOT EXISTS memories_created_at ON memories(created_at ASC);
 
       -- Keep FTS index in sync automatically
       CREATE TRIGGER IF NOT EXISTS memories_ai
@@ -242,6 +260,7 @@ export class MemoryStore {
     opts: { limit?: number; tags?: string[] } = {},
   ): SearchResult[] {
     const limit = opts.limit ?? 10;
+    const tw = opts.tags && opts.tags.length > 0 ? tagWhere(opts.tags, "m.tags") : null;
 
     let rows: (RawRow & { rank: number })[];
 
@@ -254,10 +273,11 @@ export class MemoryStore {
              FROM   memories_fts f
              JOIN   memories     m ON m.rowid = f.rowid
              WHERE  memories_fts MATCH ?
+             ${tw ? tw.clause : ""}
              ORDER  BY f.rank * (1.0 / m.importance)  -- lower rank & higher importance first
              LIMIT  ?`,
           )
-          .all(ftsQuery, limit) as unknown as (RawRow & { rank: number })[];
+          .all(ftsQuery, ...(tw ? tw.params : []), limit) as unknown as (RawRow & { rank: number })[];
       } catch {
         // Fallback: simple LIKE search (handles edge-case queries)
         rows = this.db
@@ -265,30 +285,26 @@ export class MemoryStore {
             `SELECT *, 0.0 as rank
              FROM memories
              WHERE content LIKE '%' || ? || '%'
+             ${tw ? tw.clause : ""}
              ORDER BY importance DESC, updated_at DESC
              LIMIT ?`,
           )
-          .all(query.trim(), limit) as unknown as (RawRow & { rank: number })[];
+          .all(query.trim(), ...(tw ? tw.params : []), limit) as unknown as (RawRow & { rank: number })[];
       }
     } else {
       rows = this.db
         .prepare(
           `SELECT *, 0.0 as rank
            FROM memories
+           WHERE 1=1
+           ${tw ? tw.clause : ""}
            ORDER BY importance DESC, updated_at DESC
            LIMIT ?`,
         )
-        .all(limit) as unknown as (RawRow & { rank: number })[];
+        .all(...(tw ? tw.params : []), limit) as unknown as (RawRow & { rank: number })[];
     }
 
-    let results: SearchResult[] = rows.map((r) => ({ ...parseRow(r), score: r.rank }));
-
-    if (opts.tags && opts.tags.length > 0) {
-      const filterTags = opts.tags;
-      results = results.filter((m) => filterTags.some((t) => m.tags.includes(t)));
-    }
-
-    return results;
+    return rows.map((r) => ({ ...parseRow(r), score: r.rank }));
   }
 
   /**
@@ -296,18 +312,19 @@ export class MemoryStore {
    */
   list(opts: { limit?: number; tags?: string[] } = {}): Memory[] {
     const limit = opts.limit ?? 20;
+    const tw = opts.tags && opts.tags.length > 0 ? tagWhere(opts.tags) : null;
+
     const rows = this.db
-      .prepare("SELECT * FROM memories ORDER BY updated_at DESC LIMIT ?")
-      .all(limit) as unknown as RawRow[];
+      .prepare(
+        `SELECT * FROM memories
+         WHERE 1=1
+         ${tw ? tw.clause : ""}
+         ORDER BY updated_at DESC
+         LIMIT ?`,
+      )
+      .all(...(tw ? tw.params : []), limit) as unknown as RawRow[];
 
-    let results = rows.map(parseRow);
-
-    if (opts.tags && opts.tags.length > 0) {
-      const filterTags = opts.tags;
-      results = results.filter((m) => filterTags.some((t) => m.tags.includes(t)));
-    }
-
-    return results;
+    return rows.map(parseRow);
   }
 
   stats(): { total: number; oldest: number | null; newest: number | null } {
@@ -321,18 +338,18 @@ export class MemoryStore {
   // ── Export / Import / Backup ──────────────────────────────────────────────
 
   exportAll(opts: { tags?: string[] } = {}): Memory[] {
+    const tw = opts.tags && opts.tags.length > 0 ? tagWhere(opts.tags) : null;
+
     const rows = this.db
-      .prepare("SELECT * FROM memories ORDER BY created_at ASC")
-      .all() as unknown as RawRow[];
+      .prepare(
+        `SELECT * FROM memories
+         WHERE 1=1
+         ${tw ? tw.clause : ""}
+         ORDER BY created_at ASC`,
+      )
+      .all(...(tw ? tw.params : [])) as unknown as RawRow[];
 
-    let results = rows.map(parseRow);
-
-    if (opts.tags && opts.tags.length > 0) {
-      const filterTags = opts.tags;
-      results = results.filter((m) => filterTags.some((t) => m.tags.includes(t)));
-    }
-
-    return results;
+    return rows.map(parseRow);
   }
 
   importAll(

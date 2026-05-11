@@ -20,10 +20,21 @@ function json(res: http.ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
+const MAX_BODY_BYTES = 1 * 1024 * 1024; // 1 MiB — generous for memory payloads
+
 function readBody(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let raw = "";
-    req.on("data", (chunk) => { raw += chunk; });
+    let size = 0;
+    req.on("data", (chunk: Buffer | string) => {
+      size += Buffer.byteLength(chunk as string);
+      if (size > MAX_BODY_BYTES) {
+        req.destroy();
+        reject(new Error("Request body too large (limit: 1 MiB)"));
+        return;
+      }
+      raw += chunk;
+    });
     req.on("end", () => {
       if (!raw.trim()) { resolve({}); return; }
       try { resolve(JSON.parse(raw)); }

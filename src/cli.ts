@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import * as readline from "node:readline";
-import { MemoryStore, type Memory, type SearchResult } from "./store.js";
+import { MemoryStore, type Memory, type SearchResult, DEFAULT_DB_PATH } from "./store.js";
 import { startHttpServer } from "./http.js";
 import {
   autoSetupMcpConfigs,
@@ -117,7 +117,7 @@ function confirm(question: string): Promise<boolean> {
 function cmdList(store: MemoryStore, args: string[]): void {
   const { flags } = parseArgs(args);
   const limit = flags["limit"] ? parseInt(flags["limit"], 10) : 20;
-  const tags = flags["tag"] ? [flags["tag"]] : undefined;
+  const tags = flags["tag"] ? flags["tag"].split(",").filter(Boolean) : undefined;
   const memories = store.list({ limit, tags });
   console.log(bold(`\nMemories (${memories.length}):\n`));
   printTable(memories);
@@ -185,12 +185,20 @@ function cmdImport(store: MemoryStore, args: string[]): void {
     console.error(red("Error: file path is required"));
     process.exit(1);
   }
-  if (!fs.existsSync(file)) {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch {
     console.error(red(`Error: file not found: ${file}`));
     process.exit(1);
   }
-  const raw = fs.readFileSync(file, "utf8");
-  const data = JSON.parse(raw) as { memories?: unknown[] };
+  let data: { memories?: unknown[] };
+  try {
+    data = JSON.parse(raw!) as { memories?: unknown[] };
+  } catch {
+    console.error(red(`Error: invalid JSON in file: ${file}`));
+    process.exit(1);
+  }
   const entries = Array.isArray(data.memories) ? data.memories : (Array.isArray(data) ? data : []);
   const result = store.importAll(
     entries as Array<{
@@ -227,7 +235,7 @@ async function cmdRestore(store: MemoryStore, args: string[]): Promise<void> {
     console.error(red(`Error: file not found: ${file}`));
     process.exit(1);
   }
-  const dbPath = process.env["KNOL_LOCAL_DB"] ?? path.join(os.homedir(), ".knol-local", "memories.db");
+  const dbPath = process.env["KNOL_LOCAL_DB"] ?? DEFAULT_DB_PATH;
   console.log(red(`WARNING: This will replace the current database at:\n  ${dbPath}`));
   const ok = await confirm("Are you sure? (y/N) ");
   if (!ok) {
@@ -306,10 +314,7 @@ function cmdSetup(args: string[]): void {
     if (r.action === "already-configured") {
       console.log(dim(`\n  No changes needed — knol-local is already in the config.`));
     } else if (r.action === "added" || r.action === "created" || r.action === "updated") {
-      const restartNote = target === "claude"
-        ? "Restart Claude Desktop to load the new MCP server."
-        : "Restart Cursor to load the new MCP server.";
-      console.log(`\n  ${restartNote}`);
+      console.log(`\n  Restart ${label} to load the new MCP server.`);
     } else if (r.action === "error") {
       console.log(`\n  ${dim("You can add the entry manually:")}`);
       console.log(JSON.stringify({ mcpServers: { "knol-local": { command: "knol-local" } } }, null, 2));

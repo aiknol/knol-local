@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 
+import { createRequire } from "node:module";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+
+const _require = createRequire(import.meta.url);
+const VERSION: string = (_require("../package.json") as { version: string }).version;
 import {
   CallToolRequestSchema,
   ListResourcesRequestSchema,
@@ -160,7 +164,7 @@ function formatDate(ms: number | null): string {
 // ── Server ─────────────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: "knol-local", version: "0.2.0" },
+  { name: "knol-local", version: VERSION },
   { capabilities: { tools: {}, resources: {} } },
 );
 

@@ -12,7 +12,7 @@
  *   - sqlite.ts   (on-demand dependency repair)
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { execSync } from "node:child_process";
@@ -36,11 +36,16 @@ import { fileURLToPath } from "node:url";
 
 const MCP_KEY = "knol-local";
 
+let _mcpEntry: { command: string; args: string[] } | undefined;
+
 function buildMcpEntry(): { command: string; args: string[] } {
-  return {
-    command: process.execPath,
-    args: [join(getPackageDir(), "dist", "index.js")],
-  };
+  if (!_mcpEntry) {
+    _mcpEntry = {
+      command: process.execPath,
+      args: [join(getPackageDir(), "dist", "index.js")],
+    };
+  }
+  return _mcpEntry;
 }
 
 /** Returns true when an existing config entry already points at the right binary+script. */
@@ -105,17 +110,13 @@ export function writeMcpEntry(
   label: string,
   createFile = false,
 ): ConfigResult {
-  const fileExists = existsSync(configPath);
-
-  if (!fileExists && !createFile) {
-    return { label, path: configPath, action: "skipped" };
-  }
-
   try {
     // Parse existing config (or start with empty object)
     let config: Record<string, unknown> = {};
-    if (fileExists) {
+    let fileExisted = false;
+    try {
       const raw = readFileSync(configPath, "utf8").trim();
+      fileExisted = true;
       if (raw) {
         try {
           config = JSON.parse(raw) as Record<string, unknown>;
@@ -123,6 +124,9 @@ export function writeMcpEntry(
           return { label, path: configPath, action: "error", detail: "File contains invalid JSON — please fix it manually." };
         }
       }
+    } catch {
+      // File does not exist
+      if (!createFile) return { label, path: configPath, action: "skipped" };
     }
 
     // Ensure mcpServers object exists
@@ -144,7 +148,7 @@ export function writeMcpEntry(
     mkdirSync(dirname(configPath), { recursive: true });
     writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
 
-    if (!fileExists) return { label, path: configPath, action: "created" };
+    if (!fileExisted) return { label, path: configPath, action: "created" };
     return { label, path: configPath, action: isUpdate ? "updated" : "added" };
   } catch (err) {
     return { label, path: configPath, action: "error", detail: err instanceof Error ? err.message : String(err) };
