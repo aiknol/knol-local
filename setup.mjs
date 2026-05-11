@@ -13,7 +13,7 @@
  *   node /path/to/knol-local/setup.mjs
  */
 
-import { openSync, writeSync, closeSync, existsSync } from "node:fs";
+import { openSync, writeSync, closeSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -55,13 +55,34 @@ try {
   const needsBetterSqlite = major < 22 || (major === 22 && minor < 5);
 
   if (needsBetterSqlite) {
-    const betterSqlitePath = join(__dir, "node_modules", "better-sqlite3");
-    if (!existsSync(betterSqlitePath)) {
+    // Try loading the module to detect both "missing" and "wrong ABI" cases.
+    // A directory-existence check misses ABI mismatches (e.g. nvm version switch).
+    let alreadyOk = false;
+    try {
+      const { createRequire } = await import("node:module");
+      createRequire(import.meta.url)("better-sqlite3");
+      alreadyOk = true;
+    } catch { /* needs install or rebuild */ }
+
+    if (!alreadyOk) {
       log(`[knol-local] Node ${process.versions.node} — installing better-sqlite3 (native SQLite fallback)…`);
       const { execSync } = await import("node:child_process");
-      const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-      execSync(`${npm} install better-sqlite3`, { cwd: __dir, stdio: "inherit" });
-      log(`[knol-local] ✓ better-sqlite3 installed.`);
+      // Use the npm adjacent to the running node so the binary targets the right ABI
+      const { existsSync } = await import("node:fs");
+      const { join: joinPath, dirname: dirnamePath } = await import("node:path");
+      const npmName = process.platform === "win32" ? "npm.cmd" : "npm";
+      const adjacentNpm = joinPath(dirnamePath(process.execPath), npmName);
+      const npm = existsSync(adjacentNpm) ? `"${adjacentNpm}"` : npmName;
+      try {
+        execSync(`${npm} install better-sqlite3`, { cwd: __dir, stdio: "inherit" });
+        log(`[knol-local] ✓ better-sqlite3 installed.`);
+      } catch {
+        // Try rebuild as fallback (binary dir exists but wrong ABI)
+        try {
+          execSync(`${npm} rebuild better-sqlite3`, { cwd: __dir, stdio: "inherit" });
+          log(`[knol-local] ✓ better-sqlite3 rebuilt.`);
+        } catch { /* sqlite.ts repair path will retry at runtime */ }
+      }
     }
   }
 } catch {

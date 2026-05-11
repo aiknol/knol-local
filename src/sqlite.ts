@@ -77,9 +77,13 @@ export const openDb: (path: string) => Db = await (async (): Promise<(path: stri
       const nodeVer = process.versions.node;
       throw new Error(
         `knol-local: SQLite is not available.\n` +
-        `  Node ${nodeVer} does not include node:sqlite (requires Node ≥ 22.5).\n` +
-        `  better-sqlite3 could not be loaded or installed automatically.\n` +
-        `  Fix: npm install -g knol-local`,
+        `  Node ${nodeVer} does not include node:sqlite (requires Node ≥ 22.5),\n` +
+        `  and better-sqlite3 could not be loaded for this Node ABI.\n` +
+        `\n` +
+        `  This usually happens when the active Node version changed since install.\n` +
+        `  Fix options:\n` +
+        `    1. Switch back to Node 22+: nvm use 22\n` +
+        `    2. Reinstall for current Node: npm install -g knol-local@latest`,
       );
     }
   }

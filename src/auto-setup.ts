@@ -14,7 +14,7 @@
  *   - sqlite.ts   (on-demand dependency repair)
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { execSync } from "node:child_process";
@@ -197,18 +197,31 @@ export function setupClient(client: "claude" | "cursor"): ConfigResult {
  * @returns true if the install succeeded (or wasn't needed), false on failure.
  */
 export function ensureBetterSqlite3(pkgDir: string): boolean {
+  // Use the npm that ships alongside the currently running node binary.
+  // This ensures the native module is compiled for the right Node ABI even
+  // when nvm has switched versions since the global package was installed.
+  const npmName = process.platform === "win32" ? "npm.cmd" : "npm";
+  const adjacentNpm = join(dirname(process.execPath), npmName);
+  const npm = existsSync(adjacentNpm) ? `"${adjacentNpm}"` : npmName;
+
+  process.stderr.write(
+    `[knol-local] Node ${process.versions.node} — installing better-sqlite3 native binary…\n`,
+  );
+
+  // stderr is inherited so build errors reach the terminal
+  const opts = { cwd: pkgDir, stdio: [null, null, "inherit"] as [null, null, "inherit"] };
+
+  // First try a clean install; if that fails, try rebuilding the existing source
   try {
-    const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-    process.stderr.write(
-      `[knol-local] Node ${process.versions.node} — installing better-sqlite3 native binary…\n`,
-    );
-    execSync(
-      `${npm} install better-sqlite3`,
-      { cwd: pkgDir, stdio: ["ignore", "pipe", "pipe"] },
-    );
+    execSync(`${npm} install better-sqlite3`, opts);
     return true;
   } catch {
-    return false;
+    try {
+      execSync(`${npm} rebuild better-sqlite3`, opts);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
