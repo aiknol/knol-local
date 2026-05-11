@@ -25,10 +25,12 @@ const CLI_COMMANDS = new Set([
   "backup", "restore", "setup", "serve", "help",
 ]);
 
+const HELP_FLAGS = new Set(["--help", "-h", "-help"]);
+
 const args  = process.argv.slice(2);
 const first = args[0] ?? "";
 
-if (first === "--mcp" || first === "" || !CLI_COMMANDS.has(first)) {
+if (first === "--mcp" || first === "" || (!CLI_COMMANDS.has(first) && !HELP_FLAGS.has(first))) {
   // MCP mode — backward compatible default
   await startMcpServer();
 } else {

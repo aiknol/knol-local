@@ -19,9 +19,39 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 // ── MCP entry ──────────────────────────────────────────────────────────────
+//
+// Claude Desktop (and some other Electron apps) launch with a stripped PATH
+// that does not include nvm, fnm, or npm global bin directories.  Using a
+// bare "knol-local" command therefore fails with ENOENT even if the binary
+// works fine in the terminal.
+//
+// Fix: write the absolute path to the Node binary + the absolute path to
+// dist/index.js.  Both are known at setup time:
+//   - process.execPath → the Node binary that is running right now
+//   - getPackageDir()  → the installed package root (dist/index.js lives here)
+//
+// Result in the config:
+//   { "command": "/Users/…/.nvm/…/bin/node",
+//     "args":    ["/Users/…/node_modules/knol-local/dist/index.js"] }
 
 const MCP_KEY = "knol-local";
-const MCP_ENTRY = { command: "knol-local" };
+
+function buildMcpEntry(): { command: string; args: string[] } {
+  return {
+    command: process.execPath,
+    args: [join(getPackageDir(), "dist", "index.js")],
+  };
+}
+
+/** Returns true when an existing config entry already points at the right binary+script. */
+function isMcpEntryCorrect(existing: Record<string, unknown>): boolean {
+  const entry = buildMcpEntry();
+  const args = Array.isArray(existing["args"]) ? (existing["args"] as unknown[]) : [];
+  return (
+    String(existing["command"] ?? "") === entry.command &&
+    String(args[0] ?? "") === entry.args[0]
+  );
+}
 
 // ── Config-file paths ──────────────────────────────────────────────────────
 
@@ -103,12 +133,12 @@ export function writeMcpEntry(
 
     // Already has the correct entry → nothing to do
     const existing = servers[MCP_KEY] as Record<string, unknown> | undefined;
-    if (existing && String(existing["command"]) === MCP_ENTRY.command) {
+    if (existing && isMcpEntryCorrect(existing)) {
       return { label, path: configPath, action: "already-configured" };
     }
 
     const isUpdate = !!existing;
-    servers[MCP_KEY] = MCP_ENTRY;
+    servers[MCP_KEY] = buildMcpEntry();
 
     // Write (create parent dirs if needed)
     mkdirSync(dirname(configPath), { recursive: true });

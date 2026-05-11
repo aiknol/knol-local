@@ -74,10 +74,22 @@ function parseArgs(args: string[]): { positional: string[]; flags: Record<string
   const flags: Record<string, string> = {};
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg.startsWith("--")) {
+    if (arg === "-h" || arg === "-help") {
+      flags["help"] = "true";
+    } else if (arg.startsWith("--")) {
       const key = arg.slice(2);
       const next = args[i + 1];
-      if (next && !next.startsWith("--")) {
+      if (next && !next.startsWith("-")) {
+        flags[key] = next;
+        i++;
+      } else {
+        flags[key] = "true";
+      }
+    } else if (arg.startsWith("-") && arg.length === 2) {
+      // single-char flags: -n 20, -t tag
+      const key = arg.slice(1);
+      const next = args[i + 1];
+      if (next && !next.startsWith("-")) {
         flags[key] = next;
         i++;
       } else {
@@ -351,31 +363,57 @@ function cmdHelp(): void {
 ${bold("knol-local")} — local memory for AI assistants
 
 ${bold("Usage:")}
-  knol-local [--mcp]                         Start MCP server (default)
+  knol-local [--mcp]                          Start MCP server (default)
   knol-local <command> [options]
+  knol-local --help | -h                      Show this help
 
 ${bold("Commands:")}
-  list [--tag <tag>] [--limit <n>]           List stored memories
-  add <content> [--tag t1,t2] [--importance] Add a memory
-  search <query> [--limit <n>] [--tag t1,t2] Full-text search
-  stats                                      Show summary statistics
-  export [--out <file>]                      Export all memories as JSON
-  import <file>                              Import memories from JSON
-  backup [--out <dir>]                       Backup database file
-  restore <file>                             Restore database from backup
-  setup [claude|cursor|codex|claude-code]    Auto-configure MCP clients
-  serve [--port 3001] [--key <apikey>]       Start HTTP REST server
-  help                                       Show this help
+  list   [--tag <tag>] [--limit <n>]          List stored memories
+  add    <content> [--tag t1,t2]              Add a memory
+         [--importance 0.0-1.0]
+  search <query> [--limit <n>]                Full-text search
+         [--tag t1,t2]
+  stats                                       Show summary statistics
+  export [--out <file>]                       Export all memories as JSON
+  import <file>                               Import memories from JSON
+  backup [--out <dir>]                        Backup database file
+  restore <file>                              Restore database from backup
+  setup  [claude|cursor|claude-code|codex]    Auto-configure MCP clients
+  serve  [--port 3001] [--key <apikey>]       Start HTTP REST server
+  help                                        Show this help
+
+${bold("MCP client setup:")}
+  knol-local setup                            Auto-detect Claude Desktop & Cursor
+  knol-local setup claude                     Claude Desktop
+  knol-local setup cursor                     Cursor
+  knol-local setup claude-code                Claude Code CLI
+  knol-local setup codex                      Codex / HTTP API instructions
 
 ${bold("Environment:")}
   KNOL_LOCAL_DB   Override the database path (default: ~/.knol-local/memories.db)
+
+${bold("Note:")}
+  Claude Desktop uses a restricted PATH. Run ${cyan("knol-local setup claude")} to
+  write the absolute node path into the config so it can find the server.
 `);
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────
 
 export async function runCli(args: string[], store: MemoryStore): Promise<void> {
+  // Support: knol-local --help / knol-local -h
+  if (args[0] === "--help" || args[0] === "-h" || args[0] === "-help") {
+    cmdHelp();
+    return;
+  }
+
   const [sub, ...rest] = args;
+
+  // Support: knol-local <cmd> --help
+  if (rest[0] === "--help" || rest[0] === "-h") {
+    cmdHelp();
+    return;
+  }
 
   switch (sub) {
     case "list":    cmdList(store, rest); break;
